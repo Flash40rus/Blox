@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Blocky Sandbox Prototype</title>
+  <style>
+    body { margin: 0; overflow: hidden; }
+    #info {
+      position: absolute; top: 10px; left: 10px;
+      color: white; font-family: sans-serif;
+      background: rgba(0,0,0,0.5); padding: 10px;
+      border-radius: 6px; pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="info">
+    WASD — ходьба, Space — прыжок, мышь — камера, ЛКМ — поставить блок
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+
+    // Сцена
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x87ceeb);
+    scene.fog = new THREE.Fog(0x87ceeb, 20, 100);
+
+    const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.shadowMap.enabled = true;
+    document.body.appendChild(renderer.domElement);
+
+    // Свет
+    scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+    dirLight.position.set(10, 20, 10);
+    dirLight.castShadow = true;
+    dirLight.shadow.mapSize.set(2048, 2048);
+    dirLight.shadow.camera.left = -50;
+    dirLight.shadow.camera.right = 50;
+    dirLight.shadow.camera.top = 50;
+    dirLight.shadow.camera.bottom = -50;
+    scene.add(dirLight);
+
+    // Земля
+    const ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(100, 100),
+      new THREE.MeshStandardMaterial({ color: 0x3a7d44 })
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.receiveShadow = true;
+    scene.add(ground);
+
+    // Создание блока
+    function createBlock(x, y, z, color = 0x8B4513) {
+      const block = new THREE.Mesh(
+        new THREE.BoxGeometry(1, 1, 1),
+        new THREE.MeshStandardMaterial({ color })
+      );
+      block.position.set(x, y, z);
+      block.castShadow = true;
+      block.receiveShadow = true;
+      block.userData.isBlock = true;
+      scene.add(block);
+      return block;
+    }
+
+    // Стартовые блоки
+    createBlock(2, 0.5, 2);
+    createBlock(3, 0.5, 2);
+    createBlock(2, 1.5, 2);
+    createBlock(-3, 0.5, -3);
+    createBlock(-3, 1.5, -3);
+    createBlock(-3, 2.5, -3);
+
+    // Блочный персонаж
+    const player = new THREE.Group();
+
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x0066ff });
+    const headMat = new THREE.MeshStandardMaterial({ color: 0xffcc99 });
+    const limbMat = new THREE.MeshStandardMaterial({ color: 0x0044aa });
+
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1, 0.4), bodyMat);
+    torso.position.y = 1.5; torso.castShadow = true; player.add(torso);
+
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), headMat);
+    head.position.y = 2.25; head.castShadow = true; player.add(head);
+
+    const leftArm = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.8, 0.25), limbMat);
+    leftArm.position.set(-0.55, 1.5, 0); leftArm.castShadow = true; player.add(leftArm);
+
+    const rightArm = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.8, 0.25), limbMat);
+    rightArm.position.set(0.55, 1.5, 0); rightArm.castShadow = true; player.add(rightArm);
+
+    const leftLeg = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.8, 0.3), limbMat);
+    leftLeg.position.set(-0.2, 0.4, 0); leftLeg.castShadow = true; player.add(leftLeg);
+
+    const rightLeg = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.8, 0.3), limbMat);
+    rightLeg.position.set(0.2, 0.4, 0); rightLeg.castShadow = true; player.add(rightLeg);
+
+    scene.add(player);
+
+    // Управление
+    const controls = new PointerLockControls(camera, document.body);
+    document.addEventListener('click', () => controls.lock());
+
+    const keys = {};
+    document.addEventListener('keydown', e => keys[e.code] = true);
+    document.addEventListener('keyup', e => keys[e.code] = false);
+
+    // Постановка блоков
+    document.addEventListener('mousedown', e => {
+      if (!controls.isLocked || e.button !== 0) return;
+
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+      const intersects = raycaster.intersectObjects(scene.children, true);
+
+      for (const hit of intersects) {
+        // Пропускаем части персонажа
+        if (hit.object.parent === player) continue;
+
+        if (hit.object === ground) {
+          const p = hit.point;
+          createBlock(Math.round(p.x), 0.5, Math.round(p.z));
+          break;
+        }
+
+        if (hit.object.userData.isBlock) {
+          const normal = hit.face.normal.clone();
+          const pos = hit.object.position.clone().add(normal);
+          createBlock(pos.x, pos.y, pos.z);
+          break;
+        }
+      }
+    });
+
+    // Физика и движение
+    const speed = 5;
+    const jumpSpeed = 7;
+    const gravity = 20;
+    let verticalVelocity = 0;
+    let canJump = true;
+    const clock = new THREE.Clock();
+
+    function animate() {
+      requestAnimationFrame(animate);
+      const delta = Math.min(clock.getDelta(), 0.1);
+
+      if (controls.isLocked) {
+        // Горизонтальное движение
+        const forward = new THREE.Vector3();
+        camera.getWorldDirection(forward);
+        forward.y = 0;
+        forward.normalize();
+
+        const right = new THREE.Vector3().crossVectors(forward, camera.up).normalize();
+        const move = new THREE.Vector3();
+
+        if (keys['KeyW']) move.add(forward);
+        if (keys['KeyS']) move.sub(forward);
+        if (keys['KeyD']) move.add(right);
+        if (keys['KeyA']) move.sub(right);
+
+        if (move.lengthSq() > 0) {
+          move.normalize().multiplyScalar(speed * delta);
+          player.position.add(move);
+        }
+
+        // Прыжок и гравитация
+        verticalVelocity -= gravity * delta;
+        player.position.y += verticalVelocity * delta;
+
+        if (keys['Space'] && canJump) {
+          verticalVelocity = jumpSpeed;
+          canJump = false;
+        }
+
+        if (player.position.y <= 0) {
+          verticalVelocity = 0;
+          player.position.y = 0;
+          canJump = true;
+        }
+
+        // Границы мира
+        player.position.x = Math.max(-50, Math.min(50, player.position.x));
+        player.position.z = Math.max(-50, Math.min(50, player.position.z));
+
+        // Камера от лица персонажа
+        camera.position.copy(player.position);
+        camera.position.y += 2.25;
+      }
+
+      renderer.render(scene, camera);
+    }
+
+    animate();
+
+    addEventListener('resize', () => {
+      camera.aspect = innerWidth / innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+    });
+  </script>
+</body>
+</html>
